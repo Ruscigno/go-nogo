@@ -1,0 +1,46 @@
+name: Bug report
+description: Something is broken
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Steps to reproduce, observed vs. expected.
+    validations: { required: true }
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - signup / login
+        - personal-minimums profile editor
+        - airport / runway entry
+        - weather fetch (METAR/TAF from NWS)
+        - go/no-go verdict (wrong or unexpected verdict)
+        - saved trip
+        - verdict-change alert email
+        - WINGS risk-assessment PDF export
+        - PWA install / service worker
+        - billing
+        - other
+    validations: { required: true }
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / device
+      description: e.g. "iOS Safari 17", "Chrome 122 Android", "Firefox 123 desktop"
+  - type: textarea
+    id: verdict-detail
+    attributes:
+      label: If a wrong/unexpected verdict — airport, your minimums, the raw METAR
+      description: >
+        e.g. "KXYZ; my minimums: ceiling 1500 ft, vis 3 SM, max xwind 12 kt;
+        METAR shown: KXYZ 1453Z 27018G28KT 10SM BKN012; app showed green,
+        I expected yellow on the ceiling." Helps reproduce verdict-engine and
+        METAR-parsing bugs.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sentry event ID / logs
+      description: Paste a Sentry event link if you have one. Scrub PII (no email addresses).

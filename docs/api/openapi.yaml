@@ -1,0 +1,575 @@
+openapi: 3.1.0
+
+# Go/No-Go API contract — DRAFT, awaiting founder review.
+#
+# This describes the Go backend service (`gonogo-api`). The SvelteKit
+# web tier proxies authenticated calls to it (per docs/02-architecture.md
+# Q2). Simple user-owned CRUD that does not need the verdict engine may
+# also go browser-direct via PostgREST + RLS and is not enumerated here.
+#
+# Cross-references: docs/03-spec.md §4 (narrative contract),
+# docs/02-architecture.md (system shape).
+
+info:
+  title: Go/No-Go API
+  version: 0.1.0-draft
+  description: >
+    The Go/No-Go backend — the NWS Aviation Weather Center integration,
+    the verdict-evaluation engine, the scheduled weather-poll +
+    verdict-change alert cron, server-side WINGS risk-assessment PDF
+    generation, and the Stripe/Resend webhook receivers. Go/No-Go is an
+    advisory decision aid; the pilot in command is solely responsible for
+    the go/no-go decision. The verdict uses minimums the pilot entered
+    and public weather data that may be stale, delayed, or incomplete.
+  contact:
+    email: tickerbeats@gmail.com
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev (air live-reload)
+  - url: https://api.gonogo.example
+    description: Production (Cloud Run us-central1) — hostname set by F-01
+
+tags:
+  - name: health
+  - name: minimums
+  - name: verdict
+  - name: trips
+  - name: wings
+  - name: billing
+  - name: webhooks
+  - name: cron
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  db: { type: string, example: ok }
+
+  /me/minimums:
+    get:
+      tags: [minimums]
+      summary: Read the authenticated pilot's personal-minimums profile
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The pilot's minimums profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MinimumsProfile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/DisclaimerRequired" }
+        "404":
+          description: No minimums profile saved yet
+    put:
+      tags: [minimums]
+      summary: Create or update the pilot's personal-minimums profile
+      description: >
+        The minimums the verdict engine compares weather against. A
+        verdict has no meaning without a saved profile.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MinimumsProfileInput" }
+      responses:
+        "200":
+          description: Profile saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MinimumsProfile" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/DisclaimerRequired" }
+
+  /me/verdict:
+    post:
+      tags: [verdict]
+      summary: On-demand go/no-go verdict for a departure/destination pair
+      description: >
+        Fetches METAR/TAF for the departure and destination airports
+        from the NWS Aviation Weather Center API (cache-aware), parses
+        them, and runs the pure-function verdict engine against the
+        pilot's saved minimums. The verdict NEVER defaults to green: if
+        the weather is missing, stale, or unparseable, the verdict is
+        `unknown` ("weather unavailable").
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VerdictRequest" }
+      responses:
+        "200":
+          description: The computed verdict (including `unknown`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerdictResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/DisclaimerRequired" }
+        "409":
+          description: >
+            No personal-minimums profile saved — the client routes the
+            pilot to the minimums editor before a verdict can be run.
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /me/trips:
+    get:
+      tags: [trips]
+      summary: List the pilot's saved trips
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Saved trips, each with its latest verdict
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SavedTrip" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [trips]
+      summary: Save a trip to watch
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SavedTripInput" }
+      responses:
+        "201":
+          description: Saved trip created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedTrip" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/DisclaimerRequired" }
+        "422":
+          description: Per-account saved-trip cap reached
+
+  /me/trips/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [trips]
+      summary: A saved trip plus its latest verdict snapshot
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The saved trip + latest verdict snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedTripDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [trips]
+      summary: Activate or deactivate a saved trip
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_active: { type: boolean }
+              required: [is_active]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedTrip" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [trips]
+      summary: Delete a saved trip (cascades verdict snapshots + alerts)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/trips/{id}/wings-pdf:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [wings]
+      summary: Render a WINGS risk-assessment PDF for a saved trip
+      description: >
+        Renders a WINGS-suitable risk-assessment PDF (weather snapshot,
+        the pilot's minimums, the verdict, a PAVE-checklist section, the
+        advisory disclaimer), writes it to R2 under a per-pilot key
+        prefix, and returns a short-lived signed GET URL.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Signed URL to the generated PDF
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/DisclaimerRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /billing/checkout:
+    post:
+      tags: [billing]
+      summary: Create a Stripe Checkout Session
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plan: { type: string, enum: [monthly, annual] }
+              required: [plan]
+      responses:
+        "200":
+          description: Stripe Checkout Session URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /billing/portal:
+    post:
+      tags: [billing]
+      summary: Create a Stripe Customer Portal session
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Customer Portal session URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /webhooks/stripe:
+    post:
+      tags: [webhooks]
+      summary: Stripe billing events
+      description: >
+        Signature verified against the RAW request body. Idempotent via
+        a UNIQUE (provider, event_id) constraint on
+        processed_webhook_events.
+      security: []
+      responses:
+        "200": { description: Event processed or de-duplicated }
+        "400": { description: Missing or invalid signature }
+
+  /webhooks/resend:
+    post:
+      tags: [webhooks]
+      summary: Resend deliverability events (bounce / complaint)
+      security: []
+      responses:
+        "200": { description: Event processed or de-duplicated }
+        "400": { description: Missing or invalid HMAC }
+
+  /cron/poll:
+    post:
+      tags: [cron]
+      summary: Scheduled weather poll + verdict-change alert fan-out
+      description: >
+        Called by Cloud Scheduler with a Google OIDC token. Collects the
+        distinct airports of all active saved trips, fetches each station
+        once (cache-aware, NWS-backoff-aware), re-evaluates each active
+        trip's verdict, and emails the pilot when a trip's verdict
+        changed. Idempotent: the at-most-once guarantee is a DB UNIQUE
+        constraint on alert_audit keyed by the verdict transition. An
+        unauthenticated POST returns 401.
+      security: [{ oidcAuth: [] }]
+      responses:
+        "204": { description: Poll complete }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase-issued ES256 JWT, verified against the JWKS endpoint.
+    oidcAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Google-issued OIDC token from Cloud Scheduler. The backend
+        verifies issuer = Google and audience = the Cloud Run service URL.
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid credential
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    DisclaimerRequired:
+      description: >
+        The pilot has not acknowledged the current advisory disclaimer.
+        The body carries an `ack_url`; the web tier redirects to
+        onboarding.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ValidationError:
+      description: Request body failed validation
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found or not owned by the caller
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            fields:
+              type: object
+              additionalProperties:
+                type: array
+                items: { type: string }
+          required: [code, message]
+      required: [error]
+
+    MinimumsProfileInput:
+      type: object
+      description: The pilot's personal weather minimums.
+      properties:
+        label: { type: string, default: "My personal minimums" }
+        min_ceiling_ft:
+          type: integer
+          minimum: 0
+          maximum: 30000
+          description: Minimum acceptable ceiling, feet AGL.
+        min_visibility_sm:
+          type: number
+          minimum: 0
+          maximum: 99
+          description: Minimum acceptable surface visibility, statute miles.
+        max_crosswind_kt:
+          type: integer
+          minimum: 0
+          maximum: 60
+          description: Maximum acceptable crosswind component, knots.
+        max_gust_factor_kt:
+          type: integer
+          minimum: 0
+          maximum: 60
+          description: Maximum acceptable gust factor (gust minus steady), knots.
+        is_ifr_current:
+          type: boolean
+          description: >
+            The pilot's own yes/no IFR-currency self-check. A single
+            decision input — Go/No-Go does NOT track or compute
+            regulatory currency (that is the sibling currency-hub).
+        max_days_since_flight:
+          type: integer
+          minimum: 0
+          maximum: 365
+          description: Maximum acceptable days since the pilot last flew.
+      required:
+        - min_ceiling_ft
+        - min_visibility_sm
+        - max_crosswind_kt
+        - max_gust_factor_kt
+        - is_ifr_current
+        - max_days_since_flight
+
+    MinimumsProfile:
+      allOf:
+        - $ref: "#/components/schemas/MinimumsProfileInput"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+
+    VerdictRequest:
+      type: object
+      properties:
+        departure_ident:
+          type: string
+          description: ICAO/FAA airport identifier; strictly validated before any NWS request.
+          example: KORL
+        destination_ident:
+          type: string
+          example: KSFB
+        runway_heading_deg:
+          type: integer
+          minimum: 0
+          maximum: 360
+          description: The planned runway heading, for the crosswind computation.
+        days_since_last_flight:
+          type: integer
+          minimum: 0
+          description: The pilot's current days-since-last-flight, for the time-since check.
+      required: [departure_ident, destination_ident]
+
+    Verdict:
+      type: string
+      enum: [go, caution, no_go, unknown]
+      description: >
+        go = green (within minimums); caution = yellow (close to a
+        minimum or partial data); no_go = red (a clear exceedance);
+        unknown = "weather unavailable" — the verdict NEVER defaults to
+        go on missing, stale, or unparseable weather.
+
+    CheckResult:
+      type: object
+      description: One per-minimum comparison result.
+      properties:
+        check:
+          type: string
+          enum: [ceiling, visibility, crosswind, gust_factor, ifr_currency, time_since_flight]
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        observed:
+          type: string
+          description: The observed value (or "unavailable").
+        minimum:
+          type: string
+          description: The pilot's minimum for this check.
+        note: { type: string }
+
+    ParsedWeather:
+      type: object
+      description: The parsed observation the verdict was computed from.
+      properties:
+        station: { type: string }
+        kind: { type: string, enum: [metar, taf] }
+        issued_at: { type: string, format: date-time }
+        raw_text:
+          type: string
+          description: The raw METAR/TAF string — rendered as text only, never as HTML.
+        ceiling_ft: { type: integer, nullable: true }
+        visibility_sm: { type: number, nullable: true }
+        wind_dir_deg: { type: integer, nullable: true }
+        wind_speed_kt: { type: integer, nullable: true }
+        wind_gust_kt: { type: integer, nullable: true }
+        flight_category:
+          type: string
+          nullable: true
+          enum: [VFR, MVFR, IFR, LIFR]
+        parse_ok:
+          type: boolean
+          description: false → the observation was unparseable; the verdict is `unknown`.
+        is_stale:
+          type: boolean
+          description: true → the observation is older than the freshness threshold.
+
+    VerdictResult:
+      type: object
+      properties:
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        evaluated_at: { type: string, format: date-time }
+        departure:
+          type: object
+          properties:
+            ident: { type: string }
+            weather: { $ref: "#/components/schemas/ParsedWeather" }
+        destination:
+          type: object
+          properties:
+            ident: { type: string }
+            weather: { $ref: "#/components/schemas/ParsedWeather" }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/CheckResult" }
+        crosswind_kt:
+          type: integer
+          nullable: true
+          description: Computed crosswind component for the chosen runway.
+        headwind_kt:
+          type: integer
+          nullable: true
+          description: Computed headwind (negative = tailwind) for the chosen runway.
+        disclaimer:
+          type: string
+          description: The advisory disclaimer text — always present.
+        weather_unavailable:
+          type: boolean
+          description: true when verdict == unknown — the UI shows the "weather unavailable" state.
+      required: [verdict, evaluated_at, checks, disclaimer]
+
+    SavedTripInput:
+      type: object
+      properties:
+        departure_ident: { type: string, example: KORL }
+        destination_ident: { type: string, example: KSFB }
+        runway_heading_deg: { type: integer, minimum: 0, maximum: 360 }
+        planned_departure_at:
+          type: string
+          format: date-time
+          nullable: true
+      required: [departure_ident, destination_ident]
+
+    SavedTrip:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        departure_ident: { type: string }
+        destination_ident: { type: string }
+        runway_heading_deg: { type: integer, nullable: true }
+        planned_departure_at: { type: string, format: date-time, nullable: true }
+        is_active: { type: boolean }
+        last_verdict: { $ref: "#/components/schemas/Verdict" }
+        last_evaluated_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    SavedTripDetail:
+      allOf:
+        - $ref: "#/components/schemas/SavedTrip"
+        - type: object
+          properties:
+            latest_verdict_snapshot: { $ref: "#/components/schemas/VerdictResult" }

@@ -1,0 +1,40 @@
+# backend/go.mod placeholder
+#
+# This file is a PLACEHOLDER. No Go module is initialized yet — the Go
+# service is scaffolded as empty skeleton directories in Phase 0 and
+# implemented starting in Phase 5 / M3. See docs/04-plan.md.
+#
+# When implementation begins, the first backend ticket runs:
+#
+#   cd backend
+#   go mod init github.com/Ruscigno/go-nogo/backend
+#   go get github.com/jackc/pgx/v5
+#   go get github.com/golang-jwt/jwt/v5
+#   go get github.com/MicahParks/keyfunc/v3        # JWKS for Supabase JWT verify
+#   go get github.com/google/uuid
+#   go get github.com/jung-kurt/gofpdf             # or a maintained fork — WINGS PDF
+#
+# Conventions (mirroring tail-number-radar / currency-hub, per docs/adr/0001):
+#   - Go 1.25+, `toolchain` pinned so govulncheck's stdlib check stays current.
+#   - Routing:   stdlib net/http.ServeMux (Go 1.22+ enhanced patterns). No chi/gin.
+#   - DB:        pgx/v5 + sqlc-generated queries. No GORM, no database/sql.
+#   - Migrations: golang-migrate, shared db/migrations/ with the web tier.
+#   - Logging:   slog, structured JSON.
+#   - HTTP out:  stdlib net/http.Client for the NWS Aviation Weather Center
+#                fetch — timeout-bounded, descriptive User-Agent, no SDK.
+#   - Module path: github.com/Ruscigno/go-nogo/backend
+#
+# Internal package layout (created in Phase 5):
+#   internal/server   — net/http.ServeMux wiring, middleware chain
+#   internal/auth     — ES256 JWT verification (JWKS cached); OIDC verify
+#   internal/weather  — NWS Aviation Weather Center fetch + METAR/TAF parser
+#   internal/verdict  — THE ENGINE — pure functions, (parsedWeather, minimums) -> verdict
+#   internal/minimums — CRUD for personal-minimums profiles
+#   internal/trips    — CRUD for saved trips
+#   internal/alerts   — the weather-poll cron + verdict-change alert fan-out
+#   internal/wings    — server-side WINGS risk-assessment PDF generation
+#   internal/billing  — Stripe Checkout/Portal + the webhook receiver
+#   internal/db       — sqlc-generated queries + the pgxpool
+#   internal/ratelimit— in-process token bucket
+#
+# Delete this placeholder when the real go.mod lands.

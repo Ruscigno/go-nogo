@@ -1,3 +1,7 @@
+> **Amendment 2026-05-24 — Shared Mac stack pivot.** Sections below referring to Cloud Run / Cloud Scheduler / Supabase-cloud are SUPERSEDED by [ADR-0007](adr/0007-shared-mac-stack-supersedes.md). When implementation begins, Go/No-Go will run on the shared Mac stack ([portfolio architecture](https://github.com/Ruscigno/iac-tickerbeats/blob/main/docs/portfolio-architecture.md)) — assigned subdomain `gng.tickerbeats.com` (frontend) + `gng-api.tickerbeats.com` (backend). The NWS Aviation Weather Center integration, R2, Stripe, and Resend are unchanged. The research below is preserved verbatim as the original source of truth.
+
+---
+
 # Go/No-Go — MVP V1 Development Plan & Architecture Blueprint
 
 This document is the end-to-end build plan for a solo developer to ship

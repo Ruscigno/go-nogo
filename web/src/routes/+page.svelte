@@ -10,6 +10,33 @@
     no_go: "NO-GO",
     unknown: "UNKNOWN",
   };
+
+  // The minimums the engine evaluated against, formatted for the summary.
+  // Surfaced so the pilot can see WHICH numbers produced these verdicts.
+  // `$derived` so the rows track `data` across client-side navigations.
+  const minimumRows = $derived([
+    {
+      label: "Ceiling floor",
+      value: `${data.minimums.minCeilingFtAgl} ft AGL`,
+    },
+    {
+      label: "Visibility floor",
+      value: `${data.minimums.minVisibilitySm} SM`,
+    },
+    { label: "Max crosswind", value: `${data.minimums.maxCrosswindKt} kt` },
+    {
+      label: "Max gust factor",
+      value: `${data.minimums.maxGustFactorKt} kt`,
+    },
+    {
+      label: "Max days since last flight",
+      value: `${data.minimums.maxDaysSinceLastFlight} days`,
+    },
+    {
+      label: "IFR current (self-report)",
+      value: data.minimums.ifrCurrentSelfReport ? "yes" : "no",
+    },
+  ]);
 </script>
 
 <section class="dash">
@@ -24,6 +51,36 @@
       {/if}
     </p>
   </header>
+
+  <section class="mins" aria-labelledby="mins-h">
+    <div class="mins__head">
+      <h2 id="mins-h">Your personal minimums</h2>
+      {#if data.minimumsSource === "saved"}
+        <span class="mins__src mins__src--saved">saved profile</span>
+      {:else if data.minimumsSource === "default"}
+        <span class="mins__src mins__src--default">defaults</span>
+      {:else}
+        <span class="mins__src mins__src--seed">demo data</span>
+      {/if}
+    </div>
+
+    {#if data.minimumsSource === "default"}
+      <p class="mins__note">
+        You have not saved your personal minimums yet. The verdicts below are
+        computed against sensible starting defaults — set your own numbers to
+        make them yours.
+      </p>
+    {/if}
+
+    <dl class="mins__grid">
+      {#each minimumRows as row (row.label)}
+        <div class="mins__row">
+          <dt>{row.label}</dt>
+          <dd>{row.value}</dd>
+        </div>
+      {/each}
+    </dl>
+  </section>
 
   <ul class="legs">
     {#each data.verdicts as leg (leg.id)}
@@ -88,6 +145,72 @@
   }
   .warn {
     color: #b45309;
+    font-weight: 600;
+  }
+  .mins {
+    margin-top: 1.5rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    padding: 0.875rem 1rem;
+    background: #f8fafc;
+  }
+  .mins__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .mins__head h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+  }
+  .mins__src {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .mins__src--saved {
+    background: #dcfce7;
+    color: #15803d;
+  }
+  .mins__src--default {
+    background: #fef3c7;
+    color: #b45309;
+  }
+  .mins__src--seed {
+    background: #e2e8f0;
+    color: #475569;
+  }
+  .mins__note {
+    margin: 0.625rem 0 0;
+    color: #b45309;
+    font-size: 0.8125rem;
+  }
+  .mins__grid {
+    margin: 0.75rem 0 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0.25rem 1.25rem;
+  }
+  .mins__row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    padding: 0.1875rem 0;
+    border-bottom: 1px solid #eef2f6;
+  }
+  .mins__row dt {
+    color: #64748b;
+  }
+  .mins__row dd {
+    margin: 0;
+    color: #1e293b;
     font-weight: 600;
   }
   .legs {

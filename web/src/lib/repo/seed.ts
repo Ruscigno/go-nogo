@@ -12,7 +12,13 @@
 import type { Minimums } from "$lib/gonogo/types";
 import type { GoNogoRepository, Leg } from "./repository";
 
-const MINIMUMS: Minimums = {
+/**
+ * The seeded pilot's personal minimums. Used as the fallback minimums when
+ * DATABASE_URL is unset (local dev + the DB-less CI `web` lane) so the
+ * dashboard still renders a working slice. Exported so the Postgres adapter
+ * and the loader can share one source of demo numbers.
+ */
+export const SEED_MINIMUMS: Minimums = {
   minCeilingFtAgl: 1500,
   minVisibilitySm: 3,
   maxCrosswindKt: 15,
@@ -21,7 +27,13 @@ const MINIMUMS: Minimums = {
   maxDaysSinceLastFlight: 30,
 };
 
-const LEGS: Leg[] = [
+/**
+ * The seeded legs — the transient weather factors to evaluate. Exported so
+ * the Postgres adapter reuses them for `listLegs`: persisting the minimums
+ * does NOT persist the weather (the NWS fetch is a later phase, research
+ * §3.4), so the factors stay seeded in both adapters.
+ */
+export const SEED_LEGS: Leg[] = [
   {
     // GO: everything comfortably within the pilot's numbers, VMC.
     id: "kpao-ksql",
@@ -84,7 +96,7 @@ const LEGS: Leg[] = [
 /** A GoNogoRepository backed by deterministic in-memory demo data. */
 export function seedRepository(): GoNogoRepository {
   return {
-    getMinimums: async () => MINIMUMS,
-    listLegs: async () => LEGS,
+    getMinimums: async () => SEED_MINIMUMS,
+    listLegs: async () => SEED_LEGS,
   };
 }

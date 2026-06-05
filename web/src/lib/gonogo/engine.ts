@@ -123,7 +123,7 @@ const days = (v: number) => `${v} day${v === 1 ? "" : "s"}`;
  * gust was reported, which is a factor of 0 — NOT missing data. An absent
  * steady wind with a gust present is genuinely unknown.
  */
-function gustFactorFactor(
+function evaluateGustFactor(
   f: WeatherFactors,
   maximum: number,
 ): { verdict: Verdict; detail: string } {
@@ -233,7 +233,7 @@ export function evaluate(
   }
 
   if (minimums.maxGustFactorKt !== undefined) {
-    const { verdict, detail } = gustFactorFactor(
+    const { verdict, detail } = evaluateGustFactor(
       factors,
       minimums.maxGustFactorKt,
     );

@@ -19,13 +19,17 @@ export interface Leg {
   factors: WeatherFactors;
 }
 
+// Each repository instance is already scoped to ONE owner (the seed adapter
+// to its demo pilot; the Postgres adapter to the `ownerUserId` passed to its
+// factory). The owner is therefore NOT a per-call argument — passing it per
+// call would be a false contract that the adapters silently ignore.
 export interface GoNogoRepository {
   /** The pilot's personal-minimums profile (research §3.3). */
-  getMinimums(ownerUserId: string): Promise<Minimums>;
+  getMinimums(): Promise<Minimums>;
   /**
    * The observed/forecast factors per leg to evaluate. In this slice these
    * are seeded; later this is backed by the NWS fetch + METAR/TAF parse
    * done server-side (research §3.4) — NOT in this engine.
    */
-  listLegs(ownerUserId: string): Promise<Leg[]>;
+  listLegs(): Promise<Leg[]>;
 }

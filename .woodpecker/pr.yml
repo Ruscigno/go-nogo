@@ -75,25 +75,38 @@ steps:
     when:
       - event: pull_request
     commands:
-      # Check every commit introduced by THIS PR (reachable from HEAD but not
-      # from the base branch) for a Co-Authored-By trailer — not just the tip,
-      # so an intermediate commit can't sneak a co-author past the gate. Scoping
-      # with `HEAD ^origin/<base>` excludes commits already on the base branch
-      # (e.g. Dependabot merges), so a pre-existing co-authored commit on main
-      # can never fail an unrelated PR. Falls back to the tip alone if the base
-      # ref can't be resolved, so the step never scans unrelated history.
-      - >-
-        BASE="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-main}";
-        git fetch origin "$BASE" --depth=200 --quiet 2>/dev/null || true;
-        SHAS=$(git rev-list --no-merges HEAD "^origin/$BASE" 2>/dev/null || true);
-        [ -z "$SHAS" ] && SHAS=$(git rev-list --no-merges -n 1 HEAD);
-        BAD=0;
-        for SHA in $SHAS; do
+      # Check every commit introduced by THIS PR for a Co-Authored-By trailer.
+      # The PR set is `HEAD ^origin/<base>` — commits reachable from HEAD but not
+      # from the base branch — so commits already on the base (e.g. Dependabot
+      # merges carrying `Co-authored-by: dependabot[bot]`) can never fail an
+      # unrelated PR. Base resolution: the CI-provided PR base branch first
+      # (correct for non-main targets like release/*), then the remote default
+      # branch, then `main`. If the base ref still can't be resolved on a shallow
+      # clone, fall back to a bounded recent-history walk (50 commits, not just
+      # the tip) so multi-commit PRs stay covered. Runs under `bash`; the SHA
+      # list is iterated with `read` (no unquoted word-splitting — shellcheck
+      # SC2086). Validated manually against real repo state (excludes the base,
+      # catches an intermediate trailer); a shell CI guard isn't unit-tested.
+      - |
+        BASE="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-}"
+        [ -z "$BASE" ] && BASE="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+        [ -z "$BASE" ] && BASE=main
+        git fetch origin "$BASE" --depth=200 --quiet 2>/dev/null || true
+        if git rev-parse --verify --quiet "origin/$BASE" >/dev/null 2>&1; then
+          SHAS="$(git rev-list --no-merges HEAD "^origin/$BASE")"
+        else
+          SHAS="$(git rev-list --no-merges -n 50 HEAD)"
+        fi
+        BAD=0
+        while IFS= read -r SHA; do
+          [ -n "$SHA" ] || continue
           if git log -1 --format='%B' "$SHA" | grep -iqE '^Co-Authored-By:'; then
-            echo "ERROR $(git log -1 --oneline "$SHA") has a Co-Authored-By trailer (single-author policy)."; BAD=1;
-          fi;
-        done;
+            echo "ERROR $(git log -1 --oneline "$SHA") has a Co-Authored-By trailer (single-author policy)."
+            BAD=1
+          fi
+        done <<< "$SHAS"
         if [ "$BAD" -ne 0 ]; then echo "See .claude/rules/engineering.md — single author per commit."; exit 1; fi
+        echo "single-author: OK"
 
   - name: no-pii-in-logs
     image: bash

@@ -53,13 +53,16 @@ if [ -f "$(git rev-parse --git-dir)/shallow" ] && ! git merge-base HEAD "origin/
   exit 1
 fi
 
-shas="$(git rev-list --no-merges HEAD "^origin/$base")"
+if ! shas="$(git rev-list --no-merges HEAD "^origin/$base")"; then
+  echo "ERROR git rev-list failed unexpectedly — cannot scope the single-author check."
+  exit 1
+fi
 
 bad=0
 checked=""
 while IFS= read -r sha; do
   [ -n "$sha" ] || continue
-  checked="$checked ${sha:0:9}"
+  checked="${checked:+$checked }${sha:0:9}"
   if ! body="$(git log -1 --format='%B' "$sha")"; then
     echo "ERROR could not read commit message for $sha."
     bad=1
@@ -75,4 +78,4 @@ if [ "$bad" -ne 0 ]; then
   echo "See .claude/rules/engineering.md — single author per commit."
   exit 1
 fi
-echo "single-author: OK (checked:${checked:- none})"
+echo "single-author: OK (checked: ${checked:-none})"

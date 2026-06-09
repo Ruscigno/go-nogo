@@ -11,13 +11,14 @@
 # exclusion (the Dependabot regression — asserted on the *scanned set*, not just
 # the exit code), all three base-name branches (CI var, origin/HEAD, literal
 # "main") and the loud failure when the base ref can't be resolved.
-set -u
+set -eu   # -e so a failed setup command (e.g. `git push`) aborts instead of
+          # running a case against a mis-configured repo (a false PASS).
 
 SCRIPT="$(cd "$(dirname "$0")" && pwd)/check-single-author.sh"
 fail=0
 TMP=""
 
-cleanup() { cd / || return; [ -n "${TMP:-}" ] && rm -rf "$TMP"; }
+cleanup() { cd / 2>/dev/null || true; [ -n "${TMP:-}" ] && rm -rf "$TMP"; return 0; }
 trap cleanup EXIT
 
 mkrepo() {
@@ -38,12 +39,15 @@ mkrepo() {
 # coauthored <subject> <author> — an empty commit whose body carries a trailer
 coauthored() { printf '%s\n\nCo-authored-by: %s\n' "$1" "$2" | git commit -q --allow-empty -F -; }
 
-short() { local s; s="$(git rev-parse "$1")"; printf '%s' "${s:0:9}"; }
+# set -e is not inherited inside the `$(short …)` command sub, so guard rev-parse
+# explicitly: a failure exits the sub non-zero, which aborts the (set -e) caller.
+short() { local s; s="$(git rev-parse "$1")" || { echo "rev-parse failed: $1" >&2; exit 1; }; printf '%s' "${s:0:9}"; }
 
 # expect <description> <want_exit> [must_contain] [must_NOT_contain]
 expect() {
   local desc="$1" want="$2" inc="${3:-}" exc="${4:-}" out status okk=1
-  out="$(bash "$SCRIPT" 2>&1)"; status=$?
+  # `if` keeps `set -e` from aborting on the gate's intended non-zero exits.
+  if out="$(bash "$SCRIPT" 2>&1)"; then status=0; else status=$?; fi
   [ "$status" -eq "$want" ] || okk=0
   if [ -n "$inc" ] && ! printf '%s' "$out" | grep -qF "$inc"; then okk=0; fi
   if [ -n "$exc" ] &&   printf '%s' "$out" | grep -qF "$exc"; then okk=0; fi

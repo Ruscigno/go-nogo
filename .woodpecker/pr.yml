@@ -75,19 +75,20 @@ steps:
     when:
       - event: pull_request
     commands:
-      # Walk every non-merge commit on this PR (merge-base of the PR base
-      # branch..HEAD) for a Co-Authored-By trailer — not just the tip — so an
-      # intermediate commit can't sneak a co-author past the gate. Robust on
-      # the local backend's shallow clone: it fetches the base only when one is
-      # set, and falls back to a bounded HEAD walk if the merge-base lookup
-      # can't resolve, so the step never exits 128.
+      # Check every commit introduced by THIS PR (reachable from HEAD but not
+      # from the base branch) for a Co-Authored-By trailer — not just the tip,
+      # so an intermediate commit can't sneak a co-author past the gate. Scoping
+      # with `HEAD ^origin/<base>` excludes commits already on the base branch
+      # (e.g. Dependabot merges), so a pre-existing co-authored commit on main
+      # can never fail an unrelated PR. Falls back to the tip alone if the base
+      # ref can't be resolved, so the step never scans unrelated history.
       - >-
-        BASE="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-}"; RANGE="HEAD";
-        if [ -n "$BASE" ] && git fetch origin "$BASE" --depth=200 --quiet 2>/dev/null; then
-          MB=$(git merge-base "origin/$BASE" HEAD 2>/dev/null || true); [ -n "$MB" ] && RANGE="$MB..HEAD";
-        fi;
+        BASE="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-main}";
+        git fetch origin "$BASE" --depth=200 --quiet 2>/dev/null || true;
+        SHAS=$(git rev-list --no-merges HEAD "^origin/$BASE" 2>/dev/null || true);
+        [ -z "$SHAS" ] && SHAS=$(git rev-list --no-merges -n 1 HEAD);
         BAD=0;
-        for SHA in $(git rev-list --no-merges "$RANGE" 2>/dev/null || git rev-list --no-merges -n 50 HEAD); do
+        for SHA in $SHAS; do
           if git log -1 --format='%B' "$SHA" | grep -iqE '^Co-Authored-By:'; then
             echo "ERROR $(git log -1 --oneline "$SHA") has a Co-Authored-By trailer (single-author policy)."; BAD=1;
           fi;

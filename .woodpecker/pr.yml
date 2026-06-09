@@ -79,7 +79,7 @@ steps:
       # check to the PR's own commits (`HEAD ^origin/<base>`) so a co-authored
       # commit already on the base branch can't fail an unrelated PR. Each
       # branch (base resolution, fallback, detection) is covered by
-      # scripts/check-single-author.bats — run in the single-author-tests step.
+      # scripts/check-single-author.test.sh — run in the single-author-tests step.
       - bash scripts/check-single-author.sh
 
   - name: single-author-tests
@@ -87,10 +87,10 @@ steps:
     when:
       - event: pull_request
     commands:
-      # Unit tests for the single-author gate logic. bats is host-provided
-      # (homebrew on the local backend); ensure it is on the agent's PATH.
-      - 'export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"'
-      - bats scripts/check-single-author.bats
+      # Unit tests for the single-author gate logic. Plain bash + git only —
+      # the same footprint every other step here already needs — so no extra
+      # tooling (bats) is required on the agent.
+      - bash scripts/check-single-author.test.sh
 
   - name: no-pii-in-logs
     image: bash

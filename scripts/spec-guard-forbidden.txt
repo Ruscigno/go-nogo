@@ -1,0 +1,18 @@
+# go-nogo §5.4 cut-list + portfolio off-stack keywords (one regex
+# alternative per line; lifted verbatim from the old inline spec-guard).
+native ios
+native android
+capacitor
+web push
+webpush
+flight planning
+moving map
+winds aloft
+prog chart
+sigmet
+notam
+next.js
+nextjs
+chi/chi
+gin-gonic
+GORM

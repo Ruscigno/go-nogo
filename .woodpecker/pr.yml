@@ -51,46 +51,43 @@ steps:
   # ----------------------------------------------------------------------
   # Always-on gates
   # ----------------------------------------------------------------------
+# >>> shared-ci-gates (managed by iac-tickerbeats/ci/gates — do not edit) >>>
+  - name: gates-integrity
+    image: bash
+    when:
+      - event: pull_request
+    commands:
+      - bash scripts/check-ci-gates-integrity.sh
   - name: secret-scan
     image: bash
     commands:
-      # Scan the full git history of this branch (not just the working
-      # tree) so accidentally-committed-then-removed secrets are caught.
-      # The .gitleaks.toml allowlist covers .env.example and docs/.
-      - gitleaks detect --no-banner --redact --source=.
-
+      - bash scripts/check-secret-scan.sh
   - name: sast
     image: bash
     commands:
-      - >-
-        semgrep ci
-        --config p/owasp-top-ten
-        --config p/security-audit
-        --config p/typescript
-        --config p/javascript
-        --config p/golang
-
+      - bash scripts/check-sast.sh
   - name: single-author
     image: bash
     when:
       - event: pull_request
     commands:
-      # Logic + rationale live in the script; it scopes the Co-Authored-By
-      # check to the PR's own commits (`HEAD ^origin/<base>`) so a co-authored
-      # commit already on the base branch can't fail an unrelated PR. Each
-      # branch (base resolution, fallback, detection) is covered by
-      # scripts/check-single-author.test.sh — run in the single-author-tests step.
       - bash scripts/check-single-author.sh
-
-  - name: single-author-tests
+  - name: gates-tests
     image: bash
     when:
       - event: pull_request
     commands:
-      # Unit tests for the single-author gate logic. Plain bash + git only —
-      # the same footprint every other step here already needs — so no extra
-      # tooling (bats) is required on the agent.
+      - bash scripts/ci-lib.test.sh
       - bash scripts/check-single-author.test.sh
+      - bash scripts/check-spec-guard.test.sh
+      - bash scripts/check-ci-gates-integrity.test.sh
+  - name: spec-guard
+    image: bash
+    when:
+      - event: pull_request
+    commands:
+      - bash scripts/check-spec-guard.sh
+# <<< shared-ci-gates <<<
 
   - name: no-pii-in-logs
     image: bash
@@ -99,22 +96,6 @@ steps:
     commands:
       # Enforces AC-X05 (no PII / secrets inside log call sites).
       - bash scripts/check-no-pii-in-logs.sh
-
-  - name: spec-guard
-    image: bash
-    commands:
-      # Heuristic: warn (do not block) if the diff introduces keywords
-      # from the research §5.4 cut list or attempts to swap a load-bearing
-      # decision. Real review happens via the spec-guardian subagent.
-      #
-      # NOTE: keep each line a single shell command. YAML `>-` folding
-      # preserves newlines on continuation lines, which bash will reject
-      # when the next character is `|`. Use single-line forms.
-      - 'BASE_REF="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-main}"'
-      - 'forbidden="native ios|native android|capacitor|web push|webpush|flight planning|moving map|winds aloft|prog chart|sigmet|notam|next.js|nextjs|chi/chi|gin-gonic|GORM"'
-      - git fetch origin "$BASE_REF" --quiet || true
-      - 'matches=$(git diff "origin/$BASE_REF"...HEAD -- ":(exclude)docs/**" | grep -E "^\+" | grep -Eni "$forbidden" || true)'
-      - 'if [ -n "$matches" ]; then echo "WARNING PR introduces deferred-scope or off-stack keywords. Confirm with spec-guardian."; echo "$matches"; fi'
 
   # ----------------------------------------------------------------------
   # Web — Node 20 + pnpm + lint + typecheck + test + build + audit
